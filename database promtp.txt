@@ -1,0 +1,134 @@
+-- =============================================
+-- MATCHSYNC MASTER DATABASE SCHEMA
+-- =============================================
+CREATE DATABASE MatchSyncDB;
+GO
+USE MatchSyncDB;
+GO
+
+-- 1. USER ROLES & PERMISSIONS
+CREATE TABLE Roles (
+    RoleID INT PRIMARY KEY, -- 0: Admin, 1: Staff, 2: User
+    RoleName VARCHAR(20) NOT NULL
+);
+INSERT INTO Roles VALUES (0, 'Admin'), (1, 'Staff'), (2, 'User');
+
+-- 2. MASTER USERS TABLE
+-- Handles Login, Profile, and Loyalty Points
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY IDENTITY(1,1),
+    FullName VARCHAR(100) NOT NULL,
+    Username VARCHAR(50) UNIQUE NOT NULL,
+    PasswordHash VARCHAR(255) NOT NULL, -- To be hashed in your backend (e.g., BCrypt)
+    PhoneNumber VARCHAR(15),
+    Email VARCHAR(100),
+    RoleID INT DEFAULT 2, 
+    LoyaltyPoints INT DEFAULT 0,
+    AccountStatus VARCHAR(10) DEFAULT 'Active', -- 'Active', 'Deleted'
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (RoleID) REFERENCES Roles(RoleID)
+);
+
+-- 3. COURT CONFIGURATION
+CREATE TABLE Courts (
+    CourtID INT PRIMARY KEY IDENTITY(1,1),
+    CourtName VARCHAR(50), -- e.g., 'Court 1'
+    SportType VARCHAR(20), -- 'Badminton' or 'Volleyball'
+    HourlyRate DECIMAL(10, 2),
+    IsActive BIT DEFAULT 1 -- 0 for Maintenance
+);
+
+-- 4. THE 7AM-11PM BOOKING SYSTEM
+-- This handles the calendar table logic
+CREATE TABLE Bookings (
+    BookingID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    CourtID INT,
+    BookingDate DATE NOT NULL,
+    TimeSlot INT NOT NULL, -- 7 to 23 (7am to 11pm)
+    Status VARCHAR(20) DEFAULT 'Reserved', -- 'Reserved', 'Sold', 'Maintenance', 'Selected'
+    PaymentStatus VARCHAR(15) DEFAULT 'Pending',
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (CourtID) REFERENCES Courts(CourtID)
+);
+
+-- 5. INVENTORY & POS SYSTEM
+-- Includes Barcode for Scanning (Staff Web Requirement)
+CREATE TABLE Inventory (
+    ItemID INT PRIMARY KEY IDENTITY(1,1),
+    ItemName VARCHAR(100) NOT NULL,
+    Category VARCHAR(20), -- 'Retail', 'Rental', 'Stringing'
+    Barcode VARCHAR(100) UNIQUE, -- Can be generated or adopted
+    Price DECIMAL(10, 2) NOT NULL,
+    RedeemPoints INT DEFAULT 0, -- Points needed for User to redeem
+    StockQty INT DEFAULT 0,
+    LastUpdated DATETIME DEFAULT GETDATE()
+);
+
+-- 6. SALES & REDEMPTION HISTORY (Admin Analytics)
+CREATE TABLE Transactions (
+    TransID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    TransType VARCHAR(20), -- 'Sales', 'Rental', 'Court', 'Redemption'
+    TotalAmount DECIMAL(10, 2) DEFAULT 0.00,
+    PointsUsed INT DEFAULT 0,
+    PointsEarned INT DEFAULT 0,
+    TransDate DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- 7. CHAT & MESSAGING SYSTEM
+CREATE TABLE Messages (
+    MessageID INT PRIMARY KEY IDENTITY(1,1),
+    SenderID INT,
+    ReceiverID INT,
+    MessageContent NVARCHAR(MAX),
+    IsRead BIT DEFAULT 0,
+    SentAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (SenderID) REFERENCES Users(UserID),
+    FOREIGN KEY (ReceiverID) REFERENCES Users(UserID)
+);
+
+-- 8. ANNOUNCEMENTS (Staff Promo/Tournament Posting)
+CREATE TABLE Announcements (
+    AnnounceID INT PRIMARY KEY IDENTITY(1,1),
+    PostedBy INT,
+    Title VARCHAR(200),
+    Content NVARCHAR(MAX),
+    PostType VARCHAR(20), -- 'Promo', 'Tournament'
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (PostedBy) REFERENCES Users(UserID)
+);
+
+-- 9. NOTIFICATION LOG
+CREATE TABLE Notifications (
+    NotifID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    Title VARCHAR(100),
+    Message NVARCHAR(500),
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- =============================================
+-- INITIAL SEED DATA
+-- =============================================
+
+-- Create the Super Admin Account
+INSERT INTO Users (FullName, Username, PasswordHash, RoleID, LoyaltyPoints)
+VALUES ('System Admin', 'admin', 'AdminPass123', 0, 0);
+
+-- Create Initial Courts (5 Badminton)
+INSERT INTO Courts (CourtName, SportType, HourlyRate) VALUES 
+('Court 1', 'Badminton', 300.00),
+('Court 2', 'Badminton', 300.00),
+('Court 3', 'Badminton', 300.00),
+('Court 4', 'Badminton', 300.00),
+('Court 5', 'Badminton', 300.00);
+
+-- Create Sample Inventory Items
+INSERT INTO Inventory (ItemName, Category, Barcode, Price, RedeemPoints, StockQty) VALUES 
+('Badminton Racket Rental', 'Rental', 'RENT-001', 50.00, 500, 10),
+('Shuttlecock Pro', 'Retail', 'PRO-SH-01', 85.00, 200, 50),
+('Grip Tape', 'Retail', 'GRIP-YON-01', 120.00, 150, 100);
