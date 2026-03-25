@@ -1,0 +1,197 @@
+-- =============================================
+-- MATCHSYNC MASTER DATABASE SCHEMA (MERGED)
+-- =============================================
+
+-- 1. DATABASE CREATION
+IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'MatchSyncDB')
+BEGIN
+    CREATE DATABASE MatchSyncDB;
+END
+GO
+USE MatchSyncDB;
+GO
+
+-- 2. USER ROLES
+CREATE TABLE Roles (
+    RoleID INT PRIMARY KEY, -- 0: Admin, 1: Staff, 2: User
+    RoleName VARCHAR(20) NOT NULL
+);
+
+-- 3. USERS (Includes AccountStatus for Deactivation)
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY IDENTITY(1,1),
+    FullName VARCHAR(100) NOT NULL,
+    Username VARCHAR(50) UNIQUE NOT NULL,
+    PasswordHash VARCHAR(255) NOT NULL,
+    PhoneNumber VARCHAR(15),
+    Email VARCHAR(100),
+    RoleID INT DEFAULT 2, 
+    LoyaltyPoints INT DEFAULT 0,
+    AccountStatus VARCHAR(20) DEFAULT 'Active', -- 'Active', 'Deactivated', 'Deleted'
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (RoleID) REFERENCES Roles(RoleID)
+);
+
+-- 4. COURTS
+CREATE TABLE Courts (
+    CourtID INT PRIMARY KEY IDENTITY(1,1),
+    CourtName VARCHAR(50), 
+    SportType VARCHAR(20), -- 'Badminton' or 'Volleyball'
+    HourlyRate DECIMAL(10, 2),
+    IsActive BIT DEFAULT 1
+);
+
+-- 5. BOOKINGS (Updated for 30-min intervals and 50% payments)
+CREATE TABLE Bookings (
+    BookingID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    CourtID INT,
+    BookingDate DATE NOT NULL,
+    TimeSlot DECIMAL(4, 1) NOT NULL, -- e.g., 8.0, 8.5, 9.0
+    Status VARCHAR(20) DEFAULT 'Reserved', -- 'Reserved', 'Sold', 'Maintenance', 'Cancelled'
+    TotalPrice DECIMAL(10, 2) DEFAULT 0,
+    AmountPaid DECIMAL(10, 2) DEFAULT 0,
+    PaymentStatus VARCHAR(15) DEFAULT 'Pending', -- 'Pending', 'Partial', 'Paid'
+    Title VARCHAR(100),
+    Note NVARCHAR(MAX),
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (CourtID) REFERENCES Courts(CourtID)
+);
+
+-- 6. INVENTORY
+CREATE TABLE Inventory (
+    ItemID INT PRIMARY KEY IDENTITY(1,1),
+    ItemName VARCHAR(100) NOT NULL,
+    Category VARCHAR(20), -- 'Retail', 'Rental', 'Stringing'
+    Barcode VARCHAR(100) UNIQUE,
+    Price DECIMAL(10, 2) NOT NULL,
+    RedeemPoints INT DEFAULT 0,
+    StockQty INT DEFAULT 0,
+    LastUpdated DATETIME DEFAULT GETDATE()
+);
+
+-- 7. TRANSACTIONS (Financial Logs - Merged Points logic from V1)
+CREATE TABLE Transactions (
+    TransID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    TransType VARCHAR(20), -- 'Court', 'Retail', 'Redemption'
+    TotalAmount DECIMAL(10, 2) DEFAULT 0.00,
+    PointsUsed INT DEFAULT 0,
+    PointsEarned INT DEFAULT 0,
+    TransDate DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- 8. MESSAGES (SignalR Chat Support)
+CREATE TABLE Messages (
+    MessageID INT PRIMARY KEY IDENTITY(1,1),
+    SenderID INT,
+    ReceiverID INT,
+    MessageContent NVARCHAR(MAX),
+    IsRead BIT DEFAULT 0,
+    SentAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (SenderID) REFERENCES Users(UserID),
+    FOREIGN KEY (ReceiverID) REFERENCES Users(UserID)
+);
+
+-- 9. ANNOUNCEMENTS (Brought over from V1)
+CREATE TABLE Announcements (
+    AnnounceID INT PRIMARY KEY IDENTITY(1,1),
+    PostedBy INT,
+    Title VARCHAR(200),
+    Content NVARCHAR(MAX),
+    PostType VARCHAR(20), -- 'Promo', 'Tournament'
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (PostedBy) REFERENCES Users(UserID)
+);
+
+-- 10. NOTIFICATION LOG (Brought over from V1)
+CREATE TABLE Notifications (
+    NotifID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    Title VARCHAR(100),
+    Message NVARCHAR(500),
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- 1. AUDIT LOGS TABLE
+CREATE TABLE AuditLogs (
+    LogID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT, -- The Admin/Staff who performed the action
+    Action VARCHAR(100) NOT NULL, -- e.g., 'Admin Override', 'Force Unblock'
+    Description NVARCHAR(MAX),
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- 2. WAITLIST TABLE
+CREATE TABLE Waitlists (
+    WaitlistID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT, -- The User waiting for the slot
+    CourtID INT,
+    TargetDate DATE NOT NULL,
+    TimeSlot DECIMAL(4,1) NOT NULL,
+    JoinedAt DATETIME DEFAULT GETDATE(),
+    Status VARCHAR(20) DEFAULT 'Waiting', -- 'Waiting', 'Notified', 'Expired'
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (CourtID) REFERENCES Courts(CourtID)
+);
+
+CREATE TABLE ShiftLogs (
+    ShiftID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    ShiftDate DATE DEFAULT GETDATE(),
+    LogoutTime DATETIME DEFAULT GETDATE(),
+    TotalPOSSales DECIMAL(18,2) DEFAULT 0,
+    TotalWalkInSales DECIMAL(18,2) DEFAULT 0,
+    TotalDownpayments DECIMAL(18,2) DEFAULT 0,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+CREATE TABLE Redemptions (
+    RedeemID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT,
+    ItemID INT,
+    PointsSpent INT,
+    RedemptionDate DATETIME DEFAULT GETDATE(),
+    Status VARCHAR(20) DEFAULT 'Pending', -- 'Pending' (not yet claimed at counter), 'Claimed'
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (ItemID) REFERENCES Inventory(ItemID)
+);
+
+-- =============================================
+-- INITIAL SEED DATA
+-- =============================================
+
+-- Seed Roles
+INSERT INTO Roles VALUES (0, 'Admin'), (1, 'Staff'), (2, 'User');
+
+-- Seed System and Admin Accounts
+SET IDENTITY_INSERT Users ON;
+INSERT INTO Users (UserID, FullName, Username, PasswordHash, RoleID, AccountStatus) 
+VALUES (0, 'System Broadcast', 'system', 'none', 0, 'Active'),
+       (1, 'System Admin', 'admin', 'AdminPass123', 0, 'Active');
+SET IDENTITY_INSERT Users OFF;
+
+-- Seed Courts
+INSERT INTO Courts (CourtName, SportType, HourlyRate) VALUES 
+('Court 1', 'Badminton', 250.00), 
+('Court 2', 'Badminton', 250.00),
+('Court 3', 'Badminton', 250.00), 
+('Court 4', 'Badminton', 250.00),
+('Court 5', 'Badminton', 250.00), 
+('Volleyball Court 1', 'Volleyball', 500.00);
+
+-- Seed Inventory Items (Brought over from V1)
+INSERT INTO Inventory (ItemName, Category, Barcode, Price, RedeemPoints, StockQty) VALUES 
+('Badminton Racket Rental', 'Rental', 'RENT-001', 50.00, 500, 10),
+('Shuttlecock Pro', 'Retail', 'PRO-SH-01', 85.00, 200, 50),
+('Grip Tape', 'Retail', 'GRIP-YON-01', 120.00, 150, 100);
+GO
+
+
+
+
+ALTER TABLE Bookings ADD ReferenceCode VARCHAR(20) UNIQUE;
